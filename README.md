@@ -11,3 +11,6 @@ Upload Colab File
 Upload clutterted MNIST from data folder
 
 Connect to local runtime
+
+
+https://www.tensorflow.org/tensorboard/image_summaries
