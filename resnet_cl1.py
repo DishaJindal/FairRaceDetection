@@ -14,6 +14,7 @@ import numpy as np
 import os, shutil
 from tqdm import tqdm
 
+import sys
 from imageio import imread
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
@@ -43,6 +44,20 @@ from torchvision.models.resnet import BasicBlock, _resnet, conv3x3, conv1x1
 import torch.nn as nn 
 from torchvision.models.resnet import ResNet
 
+
+import subprocess
+def printNvidiaSmi():
+  sp = subprocess.Popen(['nvidia-smi'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+  out_str = sp.communicate()
+  out_list = out_str[0].decode("utf-8").split('\n')
+
+  for i in out_list:
+    print(i)
+
+
+
+
 # %matplotlib inline
 # %load_ext tensorboard
 warnings.filterwarnings('ignore')
@@ -50,7 +65,7 @@ warnings.filterwarnings('ignore')
 import time, datetime
 
 def delete_logs():
-  folder = "./logs"
+  folder = "/cbica/home/thodupuv/acv/logs"
   for filename in os.listdir(folder):
       file_path = os.path.join(folder, filename)
       try:
@@ -63,7 +78,7 @@ def delete_logs():
 
 #delete_logs()
 def get_tensorboard_logger():
-  logs_base_dir = "./logs"
+  logs_base_dir = "/cbica/home/thodupuv/acv/logs"
   logs_dir = logs_base_dir + "/run_" + str(time.mktime(datetime.datetime.now().timetuple()))
   os.makedirs(logs_dir, exist_ok=True)
   from torch.utils.tensorboard import SummaryWriter
@@ -88,7 +103,7 @@ class CancerDataset(torch.utils.data.Dataset):
     filename = self.data.iloc[index].filename
     if 'FullRes' in filename :
         #Removes the starting "FullRes" from the filename
-        filename = filename[7:]
+        filename = filename[8:]
     data = imread(os.path.join(self.dataFolder, filename))
     data = Image.fromarray(data)
     data = data.resize((256,256))
@@ -217,7 +232,7 @@ class AttMap(nn.Module):
         out = self.bn2(out)
         # out = self.conv3(out)
         out = torch.sigmoid(out)
-        return out, []
+        return out, [out]
 
 """## ResNet Wrapper"""
 
@@ -247,10 +262,10 @@ class AdvancedBasicBlock(BasicBlock):
     out = self.conv2(out)
     out = self.bn2(out)
     attention_map, plot_data = self.attention_layer(x)
-    # plot_data.append(out)
-    # plot_data.append(out * attention_map)
+    plot_data.append(out)
+    plot_data.append(out * attention_map)
     out = out * attention_map + out
-    # plot_data.append(out)
+    plot_data.append(out)
     global global_batchid, global_epoch, global_logger
 
     local_batch_id = global_batchid
@@ -310,7 +325,6 @@ class OurResnet(ResNet):
     super(OurResnet, self).__init__(block, layers, num_classes=num_classes, zero_init_residual=zero_init_residual, groups=groups, width_per_group=width_per_group, 
                                     replace_stride_with_dilation=replace_stride_with_dilation, norm_layer=norm_layer)
     
-    self.conv_final = nn.Conv2d(self.fc.in_features, out_channels, 2)
   
   def forward(self, x):
     x = self.conv1(x)
@@ -322,11 +336,11 @@ class OurResnet(ResNet):
     x = self.layer2(x)
     x = self.layer3(x)
     x = self.layer4(x)
-    x = self.conv_final(x)
+    x = self.avgpool(x)
     return x
    
 def newResnet34(blk, pretrained=False, progress=True, out_channels=1, **kwargs):
-  model = OurResnet(blk, [2,2,2,2], out_channels, **kwargs)
+  model = OurResnet(blk, [3,4,6,3], out_channels, **kwargs)
   return model
 
 def oldResnet34(blk, pretrained=False, progress=True, out_channels=1, **kwargs):
@@ -351,8 +365,8 @@ class BaseNetwork(nn.Module):
     elif mode == 'basic':
       resnet = newResnet34(AdvancedBasicBlock_BASIC, out_channels=10)
     
-    # k = load_state_dict_from_url('https://download.pytorch.org/models/resnet34-333f7ec4.pth')
-    k = load_state_dict_from_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
+    k = load_state_dict_from_url('https://download.pytorch.org/models/resnet34-333f7ec4.pth')
+    # k = load_state_dict_from_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
     resnet.load_state_dict(k, strict=False)
     resnet.conv1 = nn.Conv2d(1, 64, 7, stride=2, padding=3, bias=False)
     self.model = resnet
@@ -425,7 +439,7 @@ class AdvNetworkWrapper():
     self.adversary.eval()
     self.racedetector.eval()
   
-  def pretrain_rd(self, train_loader):
+  def pretrain_rd(self, train_loader, test_loader):
     for epoch in tqdm(range(self.pretrain_rd_epochs)):
       self.train()
       for batch_idx, (data, target) in enumerate(train_loader):
@@ -439,11 +453,14 @@ class AdvNetworkWrapper():
         self.rd_optimizer.step()
         # Bookkeeping
         self.logger.add_scalar('PRE_TRAIN_RDNet_Loss', loss.item(), epoch*len(train_loader) + batch_idx)
-        if batch_idx % 200 == 0:
+        if batch_idx % 20 == 0:
           print('Pre Train Epoch: {} [{}/{} ({:.0f}%)]\tRD Total Loss: {:.6f}'.format(
             epoch, batch_idx * len(data), len(train_loader.dataset),
             100. * batch_idx / len(train_loader), loss.item()))
         del base_output, rd_output, data, target
+        sys.stdout.flush()
+      self.test(epoch, test_loader)
+
   
   def pretrain_ad(self, train_loader):
     for epoch in tqdm(range(self.pretrain_ad_epochs)):
@@ -459,7 +476,7 @@ class AdvNetworkWrapper():
 
         # Bookkeeping
         self.logger.add_scalar('PRE_TRAIN_AdvNet_AdvLoss', loss.item(), epoch*len(train_loader) + batch_idx)
-        if batch_idx % 200 == 0:
+        if batch_idx % 20 == 0:
           print('Pre Train Epoch: {} [{}/{} ({:.0f}%)]\tAdv Loss: {:.6f}'.format(
             epoch, batch_idx * len(data), len(train_loader.dataset),
             100. * batch_idx / len(train_loader), loss.item()))
@@ -506,19 +523,19 @@ class AdvNetworkWrapper():
 
         # Bookkeeping
         self.logger.add_scalar('AdvNet_AdvLoss', loss.item(), network_epoch*self.ad_epochs*len(train_loader) + epoch*len(train_loader) + batch_idx)
-        if batch_idx % 200 == 0:
+        if batch_idx % 20 == 0:
           print('Train Epoch: {}/{} [{}/{} ({:.0f}%)]\tAdv Loss: {:.6f}'.format(
             epoch, network_epoch, batch_idx * len(data), len(train_loader.dataset),
             100. * batch_idx / len(train_loader), loss.item()))
         del base_output, adv_output, data, target
         
   def train_network(self, train_loader, test_loader):
-    self.pretrain_rd(train_loader)
-    self.pretrain_ad(train_loader)
-    for epoch in tqdm(range(self.epochs)):
+    self.pretrain_rd(train_loader, test_loader)
+    #self.pretrain_ad(train_loader)
+    #for epoch in tqdm(range(self.epochs)):
       # self.train_adv(train_loader, epoch)
-      self.train_rd(train_loader, epoch)
-      self.test(epoch, test_loader)  
+      #self.train_rd(train_loader, epoch)
+      #self.test(epoch, test_loader)  
 
   def test(self, epoch, test_loader):
     self.eval()
@@ -543,10 +560,14 @@ class AdvNetworkWrapper():
             test_adv_loss += self.ad_criterion(adv_output, target[:,1].unsqueeze(1)).item()
             test_loss = test_rd_loss + test_adv_loss
             
-            pred = (rd_output > 0.5) * 1.0
+            pred = (rd_output > 0.5).type(torch.float)
             correct += pred.eq(target[:,0].view_as(pred)).sum().item()
             if(batch_id == 0):
               global_logger.add_images("Input Image", vutils.make_grid(data.cpu(), padding=2).unsqueeze(0),  epoch)
+		
+
+            del data, base_output, rd_output, adv_output	    
+
     test_loss /= len(test_loader)
     self.logger.add_scalar('Test_Loss', test_loss, epoch)
     self.logger.add_scalar('Test_Adv_Loss', test_adv_loss, epoch)
@@ -556,26 +577,51 @@ class AdvNetworkWrapper():
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
         test_loss, correct, len(test_loader.dataset),
         100. * correct / len(test_loader.dataset)))
+    sys.stdout.flush()
 
 """# Build Model"""
 
-df = pd.read_csv('D:\\LabelFile_2000_updated.csv')
+df = pd.read_csv('/cbica/home/thodupuv/acv/FairRaceDetection/LabelFile_2000.csv')
 df['BMI'] = (df['BMI'] - df['BMI'].min())/(df['BMI'].max() - df['BMI'].min())
 df.head()
 trainData = df[df.train == False]
 validData = df[df.train == True]
 
-dataFolder = "D:\\"
+dataFolder = "/cbica/home/santhosr/CBIG/BIRAD/Data"
 train_dataset = CancerDataset(dataFolder, trainData) 
 test_dataset = CancerDataset(dataFolder, validData) 
 
-batch_size = 32
-train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False )
-test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False )
+batch_size = 64
+train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False)
 
 bn = BaseNetwork('basic')
-rn = RaceDetector(490)
-an = Adversary(490)
+rn = RaceDetector(512)
+an = Adversary(512)
 
-adnw = AdvNetworkWrapper(bn, rn, an, bs=50, lr=0.001, rd_epochs = 1, ad_epochs= 1, epochs=10, alpha = 5)
+adnw = AdvNetworkWrapper(bn, rn, an, bs=50, lr=0.00001, rd_epochs = 1, ad_epochs= 1, epochs=10, pretrain_rd_epochs=30, alpha = 5)
+
+##################################################
+############## Custom LR #########################
+##################################################
+lr = 1e-5
+lr_cust = 1e-6
+plist =  []
+for name, param in list(adnw.basenetwork.named_parameters()):
+  pa = {}
+  pa["params"] = param
+  pa["lr"] = lr
+  if not ('attention' in name or'model.conv1' in name):
+    pa["lr"] = lr_cust
+  plist.append(pa)
+
+for name, param in list(adnw.racedetector.named_parameters()):
+  pa = {}
+  pa["params"] = param
+  pa["lr"] = lr
+  plist.append(pa)
+adnw.rd_optimizer = torch.optim.Adam(plist, lr=lr)
+##################################################
+##################################################
 adnw.train_network(train_loader, test_loader)
+
