@@ -88,34 +88,44 @@ def get_tensorboard_logger():
 
 """# Datasets
 
-## Cancer Dataset
+## Face Dataset
 """
 
-class CancerDataset(torch.utils.data.Dataset):
+class FairFaceDataset(torch.utils.data.Dataset):
   def __init__(self, dataFolder, dataList):
     self.data = dataList
     self.dataFolder = dataFolder
+    self.genderMap = {"Male":0, "Female":1}
+    self.raceMap = {"East Asian":0, "Indian":1, "Black":2,"Middle Eastern":3, "White":4,"Latino_Hispanic":5, "Southeast Asian":6}
+    self.repo = {}
+    self.pre_process()
+
+  def pre_process(self):
+    for i in range(len(self.data)):
+      print(i)
+      self.repo[i] = self.getitem(i)
+      sys.stdout.flush()
+
+  def __getitem__(self, index):
+    return self.repo[index]
+
     
   def __len__(self):
     return len(self.data)
     
-  def __getitem__(self, index):
-    filename = self.data.iloc[index].filename
-    if 'FullRes' in filename :
-        #Removes the starting "FullRes" from the filename
-        filename = filename[8:]
+  def getitem(self, index):
+    filename = self.data.iloc[index].file
     data = imread(os.path.join(self.dataFolder, filename))
     data = Image.fromarray(data)
-    data = data.resize((224,224))
+    data = data.resize((64,64))
     data = np.array(data)
-    data = np.stack([data, data, data])
-    data = np.moveaxis(data, 0, -1)
     data = data/256.0 
     data = torchvision.transforms.ToTensor()(data)
     data = data.float()
-    label = self.data.iloc[index].label
-    bmi = self.data.iloc[index].BMI
-    return data, np.array([label, bmi]).astype(float)
+    gender = self.genderMap[self.data.iloc[index].gender]
+    race = self.raceMap[self.data.iloc[index].race]
+    return data, np.array([race, gender]).astype(float)
+
 
 """#Resnet Model Classes
 
@@ -342,7 +352,8 @@ class OurResnet(ResNet):
     return x
    
 def newResnet34(blk, pretrained=False, progress=True, out_channels=1, **kwargs):
-  model = OurResnet(blk, [3,4,6,3], out_channels, **kwargs)
+  model = OurResnet(blk, [2,2,2,2], out_channels, **kwargs)
+  #model = OurResnet(blk, [3,4,6,3], out_channels, **kwargs)
   return model
 
 def oldResnet34(blk, pretrained=False, progress=True, out_channels=1, **kwargs):
@@ -369,9 +380,9 @@ class BaseNetwork(nn.Module):
     elif mode == 'res50':
       resnet = newResnet34(Bottleneck, out_channels=10)
     
-    k = load_state_dict_from_url('https://download.pytorch.org/models/resnet34-333f7ec4.pth')
+    #k = load_state_dict_from_url('https://download.pytorch.org/models/resnet34-333f7ec4.pth')
     #k = load_state_dict_from_url('https://download.pytorch.org/models/resnet50-19c8e357.pth')
-    # k = load_state_dict_from_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
+    k = load_state_dict_from_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
     resnet.load_state_dict(k, strict=False)
     #resnet.conv1 = nn.Conv2d(1, 64, 7, stride=2, padding=3, bias=False)
     self.model = resnet
@@ -386,14 +397,13 @@ class RaceDetector(nn.Module):
   def __init__(self, in_shape):
     super(RaceDetector, self).__init__()
     self.l1 = nn.Linear(in_shape, 100)
-    self.l2 = nn.Linear(100, 1)
+    self.l2 = nn.Linear(100, 7)
   
   def forward(self, x):
     x = x.view(x.shape[0], -1)
     x = self.l1(x)
     x = F.relu(x)
     x = self.l2(x)
-    x = F.sigmoid(x)
     return x
 
 class Adversary(nn.Module):
@@ -423,8 +433,8 @@ class AdvNetworkWrapper():
     self.adversary = nn.DataParallel(adversary.to(self.device))
     self.rd_optimizer = optim.Adam(list(self.basenetwork.parameters()) + list(self.racedetector.parameters()), lr=self.lr)
     self.ad_optimizer = optim.Adam(self.adversary.parameters(), lr=self.lr)
-    self.rd_criterion = nn.BCELoss()
-    self.ad_criterion = nn.SmoothL1Loss()
+    self.rd_criterion = nn.CrossEntropyLoss()
+    self.ad_criterion = nn.BCELoss()
     self.rd_epochs = rd_epochs
     self.ad_epochs = ad_epochs
     self.pretrain_ad_epochs = pretrain_ad_epochs
@@ -448,11 +458,11 @@ class AdvNetworkWrapper():
     for epoch in tqdm(range(self.pretrain_rd_epochs)):
       self.train()
       for batch_idx, (data, target) in enumerate(train_loader):
+        self.rd_optimizer.zero_grad()
         data, target = data.to(self.device).type(torch.float), target.to(self.device).type(torch.float)
         base_output = self.basenetwork(data)
-        rd_output = self.racedetector(base_output)
-        self.rd_optimizer.zero_grad()        
-        rd_loss = self.rd_criterion(rd_output, target[:,0].unsqueeze(1))
+        rd_output = self.racedetector(base_output)     
+        rd_loss = self.rd_criterion(rd_output, target[:,0].long())
         loss = rd_loss
         loss.backward()
         self.rd_optimizer.step()
@@ -471,10 +481,11 @@ class AdvNetworkWrapper():
     for epoch in tqdm(range(self.pretrain_ad_epochs)):
       self.train()
       for batch_idx, (data, target) in enumerate(train_loader):
+        self.ad_optimizer.zero_grad()
         data, target = data.to(self.device).type(torch.float), target.to(self.device).type(torch.float)
         base_output = self.basenetwork(data)
         adv_output = self.adversary(base_output.detach())
-        self.ad_optimizer.zero_grad()
+        
         loss = self.ad_criterion(adv_output, target[:,1].unsqueeze(1))
         loss.backward()
         self.ad_optimizer.step()
@@ -491,14 +502,13 @@ class AdvNetworkWrapper():
     for epoch in  tqdm(range(self.rd_epochs)):
       self.train()
       for batch_idx, (data, target) in enumerate(train_loader):
+        self.rd_optimizer.zero_grad()
         self.train_adv(train_loader, network_epoch*self.rd_epochs*len(train_loader) + epoch*len(train_loader) + batch_idx)
         data, target = data.to(self.device).type(torch.float), target.to(self.device).type(torch.float)
         base_output = self.basenetwork(data)
         rd_output = self.racedetector(base_output)
         adv_output = self.adversary(base_output)
-        
-        self.rd_optimizer.zero_grad()        
-        rd_loss = self.rd_criterion(rd_output, target[:,0].unsqueeze(1))
+        rd_loss = self.rd_criterion(rd_output, target[:,0].unsqueeze(1).long())
         adv_loss = self.ad_criterion(adv_output, target[:,1].unsqueeze(1))
         loss = rd_loss - self.alpha * adv_loss
         loss.backward()
@@ -518,10 +528,10 @@ class AdvNetworkWrapper():
     for epoch in tqdm(range(self.ad_epochs)):
       self.train()
       for batch_idx, (data, target) in enumerate(train_loader):
+        self.ad_optimizer.zero_grad()
         data, target = data.to(self.device).type(torch.float), target.to(self.device).type(torch.float)
         base_output = self.basenetwork(data)
         adv_output = self.adversary(base_output.detach())
-        self.ad_optimizer.zero_grad()
         loss = self.ad_criterion(adv_output, target[:,1].unsqueeze(1))
         loss.backward()
         self.ad_optimizer.step()
@@ -561,11 +571,11 @@ class AdvNetworkWrapper():
             rd_output = self.racedetector(base_output)
             adv_output = self.adversary(base_output)
 
-            test_rd_loss += self.rd_criterion(rd_output, target[:,0].unsqueeze(1)).item()
+            test_rd_loss += self.rd_criterion(rd_output, target[:,0].unsqueeze(1).long()).item()
             test_adv_loss += self.ad_criterion(adv_output, target[:,1].unsqueeze(1)).item()
             test_loss = test_rd_loss + test_adv_loss
             
-            pred = (rd_output > 0.5).type(torch.float)
+            pred = torch.argmax(rd_output, dim=1)
             correct += pred.eq(target[:,0].view_as(pred)).sum().item()
             if(batch_id == 0):
               global_logger.add_images("Input Image", vutils.make_grid(data.cpu(), padding=2).unsqueeze(0),  epoch)
@@ -586,21 +596,17 @@ class AdvNetworkWrapper():
 
 """# Build Model"""
 
-df = pd.read_csv('/cbica/home/thodupuv/acv/FairRaceDetection/LabelFile_2000.csv')
-df['BMI'] = (df['BMI'] - df['BMI'].min())/(df['BMI'].max() - df['BMI'].min())
-df.head()
-trainData = df[df.train == False]
-validData = df[df.train == True]
+trainData = pd.read_csv('/cbica/home/thodupuv/acv/data/FairFace/fairface_label_train.csv')
+validData = pd.read_csv('/cbica/home/thodupuv/acv/data/FairFace/fairface_label_val.csv')
+dataFolder = '/cbica/home/thodupuv/acv/data/FairFace'
+train_dataset = FairFaceDataset(dataFolder, trainData[:20000]) 
+test_dataset = FairFaceDataset(dataFolder, validData[:5000]) 
 
-dataFolder = "/cbica/home/santhosr/CBIG/BIRAD/Data"
-train_dataset = CancerDataset(dataFolder, trainData) 
-test_dataset = CancerDataset(dataFolder, validData) 
-
-batch_size = 16
+batch_size = 64
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False)
 
-bn = BaseNetwork('basic')
+bn = BaseNetwork('default')
 rn = RaceDetector(512)
 an = Adversary(512)
 
