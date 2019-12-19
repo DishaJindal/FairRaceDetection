@@ -219,7 +219,7 @@ class Adversary(nn.Module):
 """## Adversery Network Wrapper"""
 
 class AdvNetworkWrapper():
-  def __init__(self, basenetwork, racedetector, adversary, bs=50, lr=0.001, rd_epochs = 1, ad_epochs= 1, epochs=1, alpha = 0.8, pretrain_ad_epochs=1, pretrain_rd_epochs=1):
+  def __init__(self, basenetwork, racedetector, adversary, bs=50, lr=0.001, rd_epochs = 1, ad_epochs= 4, epochs=50, alpha = 0.8, pretrain_ad_epochs=20, pretrain_rd_epochs=15):
     self.lr = lr
     self.epochs = epochs
     self.batch_size = bs
@@ -396,8 +396,8 @@ class AdvNetworkWrapper():
 
 
 # Datasets and dataloaders
-train_dataset = CancerDatasetNP('/cbica/home/thodupuv/acv/data/Cancer/train_full_256.pk') 
-test_dataset = CancerDatasetNP('/cbica/home/thodupuv/acv/data/Cancer/val_full_256.pk') 
+train_dataset = CancerDatasetNP('./train_full_256.pk') 
+test_dataset = CancerDatasetNP('./val_full_256.pk') 
 batch_size = 64
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False)
@@ -408,7 +408,7 @@ rn = RaceDetector(512)
 an = Adversary(512)
 
 # Create network wrapper
-adnw = AdvNetworkWrapper(bn, rn, an, bs=50, lr=0.00001, rd_epochs = 1, ad_epochs= 1, epochs=1, pretrain_rd_epochs=1, alpha = 0.5)
+adnw = AdvNetworkWrapper(bn, rn, an, bs=50, lr=0.00001, rd_epochs = 1, ad_epochs= 4, epochs=50, pretrain_rd_epochs=15, alpha = 0.5)
 
 ############## Custom LR #########################
 lr = 1e-5
