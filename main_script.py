@@ -165,7 +165,6 @@ class BaseNetwork(nn.Module):
     
     k = load_state_dict_from_url('https://download.pytorch.org/models/resnet50-19c8e357.pth')
     resnet.load_state_dict(k, strict=False)
-    resnet.conv1 = nn.Conv2d(1, 64, 7, stride=2, padding=3, bias=False)
     self.model = resnet
 
   def forward(self, x):
@@ -220,7 +219,7 @@ class Adversary(nn.Module):
 """## Adversery Network Wrapper"""
 
 class AdvNetworkWrapper():
-  def __init__(self, basenetwork, racedetector, adversary, bs=50, lr=0.001, rd_epochs = 1, ad_epochs= 1, epochs=10, alpha = 0.8, pretrain_ad_epochs=5, pretrain_rd_epochs=5):
+  def __init__(self, basenetwork, racedetector, adversary, bs=50, lr=0.001, rd_epochs = 1, ad_epochs= 1, epochs=1, alpha = 0.8, pretrain_ad_epochs=1, pretrain_rd_epochs=1):
     self.lr = lr
     self.epochs = epochs
     self.batch_size = bs
@@ -260,7 +259,7 @@ class AdvNetworkWrapper():
         base_output = self.basenetwork(data)
         rd_output = self.racedetector(base_output)
         self.rd_optimizer.zero_grad()        
-        rd_loss = self.rd_criterion(rd_output, target[:,0].unsqueeze(1))
+        rd_loss = self.rd_criterion(rd_output, target[:,0].long())
         loss = rd_loss
         loss.backward()
         self.rd_optimizer.step()
@@ -283,7 +282,7 @@ class AdvNetworkWrapper():
         base_output = self.basenetwork(data)
         adv_output = self.adversary(base_output.detach())
         self.ad_optimizer.zero_grad()
-        loss = self.ad_criterion(adv_output, target[:,1].unsqueeze(1))
+        loss = self.ad_criterion(adv_output, target[:,1].long())
         loss.backward()
         self.ad_optimizer.step()
 
@@ -306,8 +305,8 @@ class AdvNetworkWrapper():
         adv_output = self.adversary(base_output)
         
         self.rd_optimizer.zero_grad()        
-        rd_loss = self.rd_criterion(rd_output, target[:,0].unsqueeze(1))
-        adv_loss = self.ad_criterion(adv_output, target[:,1].unsqueeze(1))
+        rd_loss = self.rd_criterion(rd_output, target[:,0].long())
+        adv_loss = self.ad_criterion(adv_output, target[:,1].long())
         loss = rd_loss - self.alpha * adv_loss
         loss.backward()
         self.rd_optimizer.step()
@@ -330,7 +329,7 @@ class AdvNetworkWrapper():
         base_output = self.basenetwork(data)
         adv_output = self.adversary(base_output.detach())
         self.ad_optimizer.zero_grad()
-        loss = self.ad_criterion(adv_output, target[:,1].unsqueeze(1))
+        loss = self.ad_criterion(adv_output, target[:,1].long())
         loss.backward()
         self.ad_optimizer.step()
 
@@ -366,13 +365,13 @@ class AdvNetworkWrapper():
             rd_output = self.racedetector(base_output)
             adv_output = self.adversary(base_output)
 
-            test_rd_loss += self.rd_criterion(rd_output, target[:,0].unsqueeze(1)).item()
-            test_adv_loss += self.ad_criterion(adv_output, target[:,1].unsqueeze(1)).item()
+            test_rd_loss += self.rd_criterion(rd_output, target[:,0].long()).item()
+            test_adv_loss += self.ad_criterion(adv_output, target[:,1].long()).item()
             test_loss = test_rd_loss + test_adv_loss
 
             n = target.shape[0]
             
-            pred = rd_output.argmax(dim=-1).view(n,-1).type(float)
+            pred = rd_output.argmax(dim=-1).view(n,-1).type(torch.float)
             correct += pred.eq(target[:,0].view_as(pred)).sum().item()
             if(batch_id == 0):
               print(data.shape)
@@ -397,8 +396,8 @@ class AdvNetworkWrapper():
 
 
 # Datasets and dataloaders
-train_dataset = CancerDatasetNP('./train_full_256.pk') 
-test_dataset = CancerDatasetNP('./val_full_256.pk') 
+train_dataset = CancerDatasetNP('/cbica/home/thodupuv/acv/data/Cancer/train_full_256.pk') 
+test_dataset = CancerDatasetNP('/cbica/home/thodupuv/acv/data/Cancer/val_full_256.pk') 
 batch_size = 64
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False)
@@ -409,7 +408,7 @@ rn = RaceDetector(512)
 an = Adversary(512)
 
 # Create network wrapper
-adnw = AdvNetworkWrapper(bn, rn, an, bs=50, lr=0.00001, rd_epochs = 1, ad_epochs= 1, epochs=10, pretrain_rd_epochs=200, alpha = 5)
+adnw = AdvNetworkWrapper(bn, rn, an, bs=50, lr=0.00001, rd_epochs = 1, ad_epochs= 1, epochs=1, pretrain_rd_epochs=1, alpha = 0.5)
 
 ############## Custom LR #########################
 lr = 1e-5
