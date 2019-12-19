@@ -171,37 +171,50 @@ class BaseNetwork(nn.Module):
   def forward(self, x):
       return self.model(x)
 
+class AdaptiveConcatPool2d(nn.Module):
+    def __init__(self, sz=None):
+        super().__init__()
+        sz = sz or (1,1)
+        self.ap = nn.AdaptiveAvgPool2d(sz)
+        self.mp = nn.AdaptiveMaxPool2d(sz)
+    def forward(self, x): return torch.cat([self.mp(x), self.ap(x)], 1)
+   
+class Flatten(nn.Module):
+    def forward(self, input):
+        return input.view(input.size(0), -1)
+
 class RaceDetector(nn.Module):
   def __init__(self, in_shape):
     super(RaceDetector, self).__init__()
-    self.l1 = nn.Linear(in_shape, 100)
-    self.bn1 = nn.BatchNorm1d(100)
-    self.d1 = nn.Dropout(p=0.5)
-    self.l2 = nn.Linear(100, 1)
+    self.seq = nn.Sequential(
+            AdaptiveConcatPool2d(), Flatten(),
+            nn.BatchNorm1d(4096, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            nn.Dropout(p=0.25),
+            nn.Linear(in_features=4096, out_features=512, bias=True),
+            nn.ReLU(inplace = True),
+            nn.BatchNorm1d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            nn.Dropout(p=0.5),
+            nn.Linear(in_features=512, out_features=2, bias=True))
   
   def forward(self, x):
-    x = x.view(x.shape[0], -1)
-    x = self.l1(x)
-    x = self.bn1(x)
-    x = F.relu(x)
-    x = self.d1(x)
-    x = self.l2(x)
-    x = F.sigmoid(x)
+    x = self.seq(x)
     return x
 
 class Adversary(nn.Module):
   def __init__(self, in_shape):
     super(Adversary, self).__init__()
-    self.l1 = nn.Linear(in_shape, 100)
-    self.bn1 = nn.BatchNorm1d(100)
-    self.l2 = nn.Linear(100, 1)
+    self.seq = nn.Sequential(
+            AdaptiveConcatPool2d(), Flatten(),
+            nn.BatchNorm1d(4096, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            nn.Dropout(p=0.25),
+            nn.Linear(in_features=4096, out_features=512, bias=True),
+            nn.ReLU(inplace = True),
+            nn.BatchNorm1d(512, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            nn.Dropout(p=0.5),
+            nn.Linear(in_features=512, out_features=4, bias=True))
   
   def forward(self, x):
-    x = x.view(x.shape[0], -1)
-    x = self.l1(x)
-    x = self.bn1(x)
-    x = F.relu(x)
-    x = self.l2(x)
+    x = self.seq(x)
     return x
 
 """## Adversery Network Wrapper"""
@@ -218,8 +231,8 @@ class AdvNetworkWrapper():
     self.adversary = adversary.to(self.device)
     self.rd_optimizer = optim.Adam(list(self.basenetwork.parameters()) + list(self.racedetector.parameters()), lr=self.lr)
     self.ad_optimizer = optim.Adam(self.adversary.parameters(), lr=self.lr)
-    self.rd_criterion = nn.BCELoss()
-    self.ad_criterion = nn.SmoothL1Loss()
+    self.rd_criterion = nn.CrossEntropyLoss()
+    self.ad_criterion = nn.CrossEntropyLoss()
     self.rd_epochs = rd_epochs
     self.ad_epochs = ad_epochs
     self.pretrain_ad_epochs = pretrain_ad_epochs
@@ -356,8 +369,10 @@ class AdvNetworkWrapper():
             test_rd_loss += self.rd_criterion(rd_output, target[:,0].unsqueeze(1)).item()
             test_adv_loss += self.ad_criterion(adv_output, target[:,1].unsqueeze(1)).item()
             test_loss = test_rd_loss + test_adv_loss
+
+            n = target.shape[0]
             
-            pred = (rd_output > 0.5).type(torch.float)
+            pred = rd_output.argmax(dim=-1).view(n,-1).type(float)
             correct += pred.eq(target[:,0].view_as(pred)).sum().item()
             if(batch_id == 0):
               print(data.shape)

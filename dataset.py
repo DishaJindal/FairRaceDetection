@@ -37,12 +37,29 @@ from attention import *
 
 class CancerDatasetNP(torch.utils.data.Dataset):
   def __init__(self, file_path):
-    with open(file_path, 'rb') as f:
-      self.repo = pickle.load(f)
+      self.c = 2
+      self.is_empty = False
+      with open(file_path, 'rb') as f:
+          self.repo = pickle.load(f)
 
   def __getitem__(self, index):
     im, lab = self.repo[index]
-    return im, lab
+    im = im[0, :, :]
+    label = lab[0]
+    norm_bmi = lab[1]
+    bmi = lab[1] * 67.7 + 4.7
+
+    bmi_bucket = -1
+    if(bmi < 15):
+        bmi_bucket = 0
+    elif(bmi < 35):
+        bmi_bucket = 1
+    elif(bmi < 55):
+        bmi_bucket = 2
+    else:
+        bmi_bucket = 3
+
+    return np.stack([im,im, im]), np.array([label, bmi_bucket, norm_bmi]).astype(float)
     
   def __len__(self):
     return len(list(self.repo.keys()))
