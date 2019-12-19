@@ -36,7 +36,7 @@ import pickle
 from attention import *
 from dataset import *
 import subprocess
-import time
+import time, datetime
 
 def printNvidiaSmi():
   sp = subprocess.Popen(['nvidia-smi'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
