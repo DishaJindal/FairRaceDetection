@@ -40,7 +40,7 @@ from backbone import *
 import time, datetime
 
 exp_name = 'image_exp'
-exp_folder = '/cbica/home/thodupuv/acv/models/Cancer/' + exp_name
+exp_folder = './' + exp_name
 
 try:
   os.mkdir(exp_folder)
@@ -163,9 +163,7 @@ class BaseNetwork(nn.Module):
     elif mode == 'res50':
       resnet = newResnet34(Bottleneck, out_channels=10)
     
-    k = load_state_dict_from_url('https://download.pytorch.org/models/resnet34-333f7ec4.pth')
-    #k = load_state_dict_from_url('https://download.pytorch.org/models/resnet50-19c8e357.pth')
-    # k = load_state_dict_from_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
+    k = load_state_dict_from_url('https://download.pytorch.org/models/resnet50-19c8e357.pth')
     resnet.load_state_dict(k, strict=False)
     resnet.conv1 = nn.Conv2d(1, 64, 7, stride=2, padding=3, bias=False)
     self.model = resnet
@@ -384,14 +382,14 @@ class AdvNetworkWrapper():
 
 
 # Datasets and dataloaders
-train_dataset = CancerDatasetNP('/cbica/home/thodupuv/acv/data/Cancer/train_full_256.pk') 
-test_dataset = CancerDatasetNP('/cbica/home/thodupuv/acv/data/Cancer/val_full_256.pk') 
+train_dataset = CancerDatasetNP('./train_full_256.pk') 
+test_dataset = CancerDatasetNP('./val_full_256.pk') 
 batch_size = 64
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False)
 
 # Create networks
-bn = BaseNetwork('att2')
+bn = BaseNetwork('res50')
 rn = RaceDetector(512)
 an = Adversary(512)
 

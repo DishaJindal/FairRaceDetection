@@ -62,3 +62,4 @@ def newResnet34(blk, pretrained=False, progress=True, out_channels=1, **kwargs):
 
 def oldResnet34(blk, pretrained=False, progress=True, out_channels=1, **kwargs):
   return _resnet('resnet34', blk, [3, 4, 6, 3], pretrained, progress, **kwargs)
+  

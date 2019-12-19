@@ -2,6 +2,10 @@
 
 python main_script.py
 
+Paths
+Dataset (main_script.py): Edit "train_dataset" and "test_dataset" paths in the main_script
+Logger (helper_functions.py): Edit "logs_base_dir" path with the logger directory
+
 ## Scipts
 
 **preprocessing_script.py**: We preprocess the data and save it as numpy arrays so avoid file IO at each epoch
