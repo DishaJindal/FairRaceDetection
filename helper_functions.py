@@ -59,9 +59,8 @@ def delete_logs():
           print('Failed to delete %s. Reason: %s' % (file_path, e))
 
 def get_tensorboard_logger():
-  global exp_name
   logs_base_dir = "/cbica/home/thodupuv/acv/logs"
-  logs_dir = logs_base_dir + "/run_" + exp_name + "_" + str(time.mktime(datetime.datetime.now().timetuple()))
+  logs_dir = logs_base_dir + "/run_" + "_" + str(time.mktime(datetime.datetime.now().timetuple()))
   os.makedirs(logs_dir, exist_ok=True)
   from torch.utils.tensorboard import SummaryWriter
   # %tensorboard --logdir {logs_base_dir} --port=9002
