@@ -33,37 +33,16 @@ from torchvision.models.resnet import BasicBlock, _resnet, conv3x3, conv1x1, Bot
 import torch.nn as nn 
 from torchvision.models.resnet import ResNet
 import pickle
-
-
-from fastai.script import *
-from fastai.vision import *
-from fastai.distributed import *
-
-def classification_loss_function(out, target):
-	new_target = target[:,0]
-	return 
-
+from attention import *
 
 class CancerDatasetNP(torch.utils.data.Dataset):
   def __init__(self, file_path):
-  	self.c = 2
-  	with open(file_path, 'rb') as f:
-  		self.repo = pickle.load(f)
+    with open(file_path, 'rb') as f:
+      self.repo = pickle.load(f)
 
   def __getitem__(self, index):
     im, lab = self.repo[index]
-    im = im[0, :, :]
-    return np.stack([im,im, im]), int(lab[0])
+    return im, lab
     
   def __len__(self):
     return len(list(self.repo.keys()))
-
-
-
-train_dataset = CancerDatasetNP('/cbica/home/thodupuv/acv/data/Cancer/train_full_256.pk') 
-test_dataset = CancerDatasetNP('/cbica/home/thodupuv/acv/data/Cancer/val_full_256.pk') 
-
-data = DataBunch.create(train_dataset, test_dataset)
-# print(data.loss_func)
-learn = cnn_learner(data, models.resnet50, metrics=accuracy, loss_func=F.cross_entropy)
-learn.fit_one_cycle(80, 1e-4)
