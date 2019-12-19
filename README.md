@@ -1,10 +1,10 @@
 # Run
 
-python3 main_script.py
+python main_script.py
 
 ## Scipts
 
-**preprossing_script.py**: We preprocess the data and save it as numpy arrays so avoid file IO at each epoch
+**preprocessing_script.py**: We preprocess the data and save it as numpy arrays so avoid file IO at each epoch
 
 **dataset.py**: Dataset class to load the data
 
