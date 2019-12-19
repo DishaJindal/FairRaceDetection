@@ -56,14 +56,11 @@ class CancerDataset(torch.utils.data.Dataset):
   def getitem(self, index):
     filename = self.data.iloc[index].filename
     if 'FullRes' in filename :
-        #Removes the starting "FullRes" from the filename
         filename = filename[8:]
     data = imread(os.path.join(self.dataFolder, filename))
     data = Image.fromarray(data)
     data = data.resize((512,512))
     data = np.array(data)
-    # data = np.stack([data, data, data])
-    # data = np.moveaxis(data, 0, -1)
     data = data/256.0 
     data = torchvision.transforms.ToTensor()(data)
     data = data.float()
@@ -71,22 +68,16 @@ class CancerDataset(torch.utils.data.Dataset):
     bmi = self.data.iloc[index].BMI
     return data, np.array([label, bmi]).astype(float)
 
-df = pd.read_csv('/cbica/home/thodupuv/acv/FairRaceDetection/LabelFile_2000.csv')
+df = pd.read_csv('LabelFile_2000.csv')
+df['BMI'] = (df['BMI'] - df['BMI'].min())/(df['BMI'].max() - df['BMI'].min())
+trainData = df[df.train == False]
+validData = df[df.train == True]
 
-# df['BMI'] = (df['BMI'] - df['BMI'].min())/(df['BMI'].max() - df['BMI'].min())
+dataFolder = "/cbica/home/santhosr/CBIG/BIRAD/Data"
+vd = CancerDataset(dataFolder, validData) 
+with open('/cbica/home/thodupuv/acv/data/Cancer/val_full_512.pk', 'wb') as f:
+  pickle.dump(vd.repo, f)
 
-print(df['BMI'].min())
-print(df['BMI'].max() - df['BMI'].min())
-
-# df.head()
-# trainData = df[df.train == False]
-# validData = df[df.train == True]
-
-# dataFolder = "/cbica/home/santhosr/CBIG/BIRAD/Data"
-# vd = CancerDataset(dataFolder, validData) 
-# with open('/cbica/home/thodupuv/acv/data/Cancer/val_full_512.pk', 'wb') as f:
-#   pickle.dump(vd.repo, f)
-
-# td = CancerDataset(dataFolder, trainData)
-# with open('/cbica/home/thodupuv/acv/data/Cancer/train_full_512.pk', 'wb') as f:
-#   pickle.dump(td.repo, f)
+td = CancerDataset(dataFolder, trainData)
+with open('/cbica/home/thodupuv/acv/data/Cancer/train_full_512.pk', 'wb') as f:
+  pickle.dump(td.repo, f)

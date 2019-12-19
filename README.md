@@ -1,16 +1,13 @@
-# Instructions to run in Moore
+# Run
 
-## Setup conda Environment
-conda activate StackGAN-New
+python3 main_script.py
 
-jupyter notebook --NotebookApp.allow_origin=* --port=8888 --NotebookApp.port_retries=0
+## Scipts
 
-## Run 
-Upload Colab File
+preprossing_script.py: We preprocess the data and save it as numpy arrays so avoid file IO at each epoch
+dataset.py: Dataset class to load the data
+attention.py: Contains different attention modules
+backbone.py: Contains all custom resnet related utilities
+helper_functions.py: Functions for the logger, deleting logs and nvidia stats
+metrics.py: Bias Metrics
 
-Upload clutterted MNIST from data folder
-
-Connect to local runtime
-
-
-https://www.tensorflow.org/tensorboard/image_summaries

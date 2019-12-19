@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import os, shutil
 from tqdm import tqdm
-
 import sys
 from imageio import imread
 import matplotlib.pyplot as plt
@@ -11,13 +10,10 @@ from itertools import chain
 import itertools
 import logging
 import warnings
-
 from torch.nn import Sigmoid
 from torch import Tensor, LongTensor
 from torch.autograd import Variable
-
 import torchvision.transforms as transforms
-
 import torch
 import torchvision
 import torch.nn as nn
@@ -38,6 +34,7 @@ from dataset import *
 import subprocess
 import time, datetime
 
+# Helper function to get GPU stats
 def printNvidiaSmi():
   sp = subprocess.Popen(['nvidia-smi'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
@@ -47,6 +44,7 @@ def printNvidiaSmi():
   for i in out_list:
     print(i)
 
+# Helper function to delete all tensorboard logs from our directory
 def delete_logs():
   folder = "/cbica/home/thodupuv/acv/logs"
   for filename in os.listdir(folder):
@@ -59,11 +57,11 @@ def delete_logs():
       except Exception as e:
           print('Failed to delete %s. Reason: %s' % (file_path, e))
 
+# Helper function to get the logger
 def get_tensorboard_logger():
   logs_base_dir = "/cbica/home/thodupuv/acv/logs"
   logs_dir = logs_base_dir + "/run_" + "_" + str(time.mktime(datetime.datetime.now().timetuple()))
   os.makedirs(logs_dir, exist_ok=True)
   from torch.utils.tensorboard import SummaryWriter
-  # %tensorboard --logdir {logs_base_dir} --port=9002
   logger = SummaryWriter(logs_dir)
   return logger

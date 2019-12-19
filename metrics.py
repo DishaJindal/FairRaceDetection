@@ -39,6 +39,7 @@ from helper_functions import *
 from backbone import *
 import time, datetime
 
+# Helper function to calculate bias
 def calculate_bias(pred_list, true_list, bmi_list):
     d = {'BMI': bmi_list, 'truthLabel': true_list, 'predLabel': pred_list}
     predDf = pd.DataFrame(d, columns=['BMI','truthLabel','predLabel'])
@@ -71,6 +72,7 @@ def calculate_bias(pred_list, true_list, bmi_list):
     biasScore = totalDiff/totalValidBuckets
     return torch.tensor(biasScore) 
 
+# Main function to calculate bias
 def bias(input:Tensor, targetFull:Tensor)->Rank0Tensor:
     "Computes accuracy with `targs` when `input` is bs * n_classes."
     n = targetFull.shape[0]
