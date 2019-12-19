@@ -43,6 +43,9 @@ from torchvision.models.utils import load_state_dict_from_url
 from torchvision.models.resnet import BasicBlock, _resnet, conv3x3, conv1x1, Bottleneck
 import torch.nn as nn 
 from torchvision.models.resnet import ResNet
+import pickle
+import torchvision.transforms as transforms
+
 
 
 import subprocess
@@ -90,42 +93,22 @@ def get_tensorboard_logger():
 
 ## Face Dataset
 """
+normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
-class FairFaceDataset(torch.utils.data.Dataset):
-  def __init__(self, dataFolder, dataList):
-    self.data = dataList
-    self.dataFolder = dataFolder
-    self.genderMap = {"Male":0, "Female":1}
-    self.raceMap = {"East Asian":0, "Indian":1, "Black":2,"Middle Eastern":3, "White":4,"Latino_Hispanic":5, "Southeast Asian":6}
-    self.repo = {}
-    self.pre_process()
 
-  def pre_process(self):
-    for i in range(len(self.data)):
-      print(i)
-      self.repo[i] = self.getitem(i)
-      sys.stdout.flush()
+
+class FairFaceDatasetNP(torch.utils.data.Dataset):
+  def __init__(self, file_path):
+    with open(file_path, 'rb') as f:
+      self.repo = pickle.load(f)
 
   def __getitem__(self, index):
-    return self.repo[index]
-
+    im, lab = self.repo[index]
+    return normalize(torch.tensor(im)).numpy(), lab
     
   def __len__(self):
-    return len(self.data)
+    return len(list(self.repo.keys()))
     
-  def getitem(self, index):
-    filename = self.data.iloc[index].file
-    data = imread(os.path.join(self.dataFolder, filename))
-    data = Image.fromarray(data)
-    data = data.resize((64,64))
-    data = np.array(data)
-    data = data/256.0 
-    data = torchvision.transforms.ToTensor()(data)
-    data = data.float()
-    gender = self.genderMap[self.data.iloc[index].gender]
-    race = self.raceMap[self.data.iloc[index].race]
-    return data, np.array([race, gender]).astype(float)
-
 
 """#Resnet Model Classes
 
@@ -336,6 +319,8 @@ class OurResnet(ResNet):
   def __init__(self, block, layers, out_channels, num_classes=1000, zero_init_residual=False, groups=1, width_per_group=64, replace_stride_with_dilation=None, norm_layer=None):
     super(OurResnet, self).__init__(block, layers, num_classes=num_classes, zero_init_residual=zero_init_residual, groups=groups, width_per_group=width_per_group, 
                                     replace_stride_with_dilation=replace_stride_with_dilation, norm_layer=norm_layer)
+    self.d1 = nn.Dropout(p=0.5)
+    self.d2 = nn.Dropout(p=0.5)
     
   
   def forward(self, x):
@@ -346,14 +331,16 @@ class OurResnet(ResNet):
     
     x = self.layer1(x)
     x = self.layer2(x)
+    x = self.d1(x)
     x = self.layer3(x)
+    x = self.d2(x)
     x = self.layer4(x)
     x = self.avgpool(x)
     return x
    
 def newResnet34(blk, pretrained=False, progress=True, out_channels=1, **kwargs):
-  model = OurResnet(blk, [2,2,2,2], out_channels, **kwargs)
-  #model = OurResnet(blk, [3,4,6,3], out_channels, **kwargs)
+  #model = OurResnet(blk, [2,2,2,2], out_channels, **kwargs)
+  model = OurResnet(blk, [3,4,6,3], out_channels, **kwargs)
   return model
 
 def oldResnet34(blk, pretrained=False, progress=True, out_channels=1, **kwargs):
@@ -380,10 +367,10 @@ class BaseNetwork(nn.Module):
     elif mode == 'res50':
       resnet = newResnet34(Bottleneck, out_channels=10)
     
-    #k = load_state_dict_from_url('https://download.pytorch.org/models/resnet34-333f7ec4.pth')
+    k = load_state_dict_from_url('https://download.pytorch.org/models/resnet34-333f7ec4.pth')
     #k = load_state_dict_from_url('https://download.pytorch.org/models/resnet50-19c8e357.pth')
-    k = load_state_dict_from_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
-    resnet.load_state_dict(k, strict=False)
+    #k = load_state_dict_from_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
+    #resnet.load_state_dict(k, strict=False)
     #resnet.conv1 = nn.Conv2d(1, 64, 7, stride=2, padding=3, bias=False)
     self.model = resnet
     model_parameters = filter(lambda p: p.requires_grad, self.model.parameters())
@@ -396,14 +383,16 @@ class BaseNetwork(nn.Module):
 class RaceDetector(nn.Module):
   def __init__(self, in_shape):
     super(RaceDetector, self).__init__()
-    self.l1 = nn.Linear(in_shape, 100)
+    self.l1 = nn.Linear(in_shape, 7)
     self.l2 = nn.Linear(100, 7)
+    self.d1 = nn.Dropout(p=0.5)
   
   def forward(self, x):
     x = x.view(x.shape[0], -1)
+    x = self.d1(x)
     x = self.l1(x)
-    x = F.relu(x)
-    x = self.l2(x)
+    # x = F.relu(x)
+    # x = self.l2(x)
     return x
 
 class Adversary(nn.Module):
@@ -417,9 +406,14 @@ class Adversary(nn.Module):
     x = self.l1(x)
     x = F.relu(x)
     x = self.l2(x)
+    x = F.sigmoid(x)
     return x
 
 """## Adversery Network Wrapper"""
+
+def freeze_part(model_part):
+  for param in model_part.parameters():
+    param.requires_grad = False
 
 class AdvNetworkWrapper():
   def __init__(self, basenetwork, racedetector, adversary, bs=50, lr=0.001, rd_epochs = 1, ad_epochs= 1, epochs=10, alpha = 0.8, pretrain_ad_epochs=5, pretrain_rd_epochs=5):
@@ -427,12 +421,25 @@ class AdvNetworkWrapper():
     self.epochs = epochs
     self.batch_size = bs
     self.device = "cuda" if torch.cuda.is_available() else "cpu"
-    self.kwargs = {'num_workers': 0, 'pin_memory': True} 
+    self.kwargs = {'num_workers': 0, 'pin_memory': True}
+
+    # freeze_part(basenetwork.model.conv1)
+    # freeze_part(basenetwork.model.bn1)
+    # freeze_part(basenetwork.model.layer1)
+    # freeze_part(basenetwork.model.layer2)
+
+
     self.basenetwork = nn.DataParallel(basenetwork.to(self.device))
     self.racedetector = nn.DataParallel(racedetector.to(self.device))
     self.adversary = nn.DataParallel(adversary.to(self.device))
-    self.rd_optimizer = optim.Adam(list(self.basenetwork.parameters()) + list(self.racedetector.parameters()), lr=self.lr)
-    self.ad_optimizer = optim.Adam(self.adversary.parameters(), lr=self.lr)
+    # self.rd_optimizer = optim.Adam(list(self.basenetwork.parameters()) + list(self.racedetector.parameters()), lr=self.lr)
+    # self.ad_optimizer = optim.Adam(self.adversary.parameters(), lr=self.lr)
+
+    self.rd_optimizer = optim.SGD(list(self.basenetwork.parameters()) + list(self.racedetector.parameters()), lr=self.lr, momentum=0.9, weight_decay=1e-4)
+    self.ad_optimizer = optim.SGD(self.adversary.parameters(), lr=self.lr, momentum=0.9, weight_decay=1e-4)
+
+
+
     self.rd_criterion = nn.CrossEntropyLoss()
     self.ad_criterion = nn.BCELoss()
     self.rd_epochs = rd_epochs
@@ -443,7 +450,8 @@ class AdvNetworkWrapper():
     self.alpha = alpha
     global global_logger
     self.logger = global_logger
-  
+
+    
   def train(self):
     self.basenetwork.train()
     self.adversary.train()
@@ -508,7 +516,7 @@ class AdvNetworkWrapper():
         base_output = self.basenetwork(data)
         rd_output = self.racedetector(base_output)
         adv_output = self.adversary(base_output)
-        rd_loss = self.rd_criterion(rd_output, target[:,0].unsqueeze(1).long())
+        rd_loss = self.rd_criterion(rd_output, target[:,0].long())
         adv_loss = self.ad_criterion(adv_output, target[:,1].unsqueeze(1))
         loss = rd_loss - self.alpha * adv_loss
         loss.backward()
@@ -571,12 +579,12 @@ class AdvNetworkWrapper():
             rd_output = self.racedetector(base_output)
             adv_output = self.adversary(base_output)
 
-            test_rd_loss += self.rd_criterion(rd_output, target[:,0].unsqueeze(1).long()).item()
+            test_rd_loss += self.rd_criterion(rd_output, target[:,0].long()).item()
             test_adv_loss += self.ad_criterion(adv_output, target[:,1].unsqueeze(1)).item()
             test_loss = test_rd_loss + test_adv_loss
             
             pred = torch.argmax(rd_output, dim=1)
-            correct += pred.eq(target[:,0].view_as(pred)).sum().item()
+            correct += pred.eq(target[:,0].long().view_as(pred)).sum().item()
             if(batch_id == 0):
               global_logger.add_images("Input Image", vutils.make_grid(data.cpu(), padding=2).unsqueeze(0),  epoch)
 		
@@ -596,43 +604,51 @@ class AdvNetworkWrapper():
 
 """# Build Model"""
 
-trainData = pd.read_csv('/cbica/home/thodupuv/acv/data/FairFace/fairface_label_train.csv')
-validData = pd.read_csv('/cbica/home/thodupuv/acv/data/FairFace/fairface_label_val.csv')
-dataFolder = '/cbica/home/thodupuv/acv/data/FairFace'
-train_dataset = FairFaceDataset(dataFolder, trainData[:20000]) 
-test_dataset = FairFaceDataset(dataFolder, validData[:5000]) 
+train_dataset = FairFaceDatasetNP('/cbica/home/thodupuv/acv/data/FairFace/train_20k_224.pk') 
+test_dataset = FairFaceDatasetNP('/cbica/home/thodupuv/acv/data/FairFace/val_3k_224.pk') 
 
 batch_size = 64
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=100, shuffle=False)
 
+
+exp_name = '20k_224_resnet_34_lr5_reg_one_final_layer'
+exp_folder = '/cbica/home/thodupuv/acv/models/FairFace/' + exp_name
+os.mkdir(exp_folder)
+
 bn = BaseNetwork('default')
 rn = RaceDetector(512)
 an = Adversary(512)
 
-adnw = AdvNetworkWrapper(bn, rn, an, bs=50, lr=0.00001, rd_epochs = 1, ad_epochs= 1, epochs=10, pretrain_rd_epochs=30, alpha = 5)
+adnw = AdvNetworkWrapper(bn, rn, an, bs=50, lr=0.0001, rd_epochs = 1, ad_epochs= 1, epochs=10, pretrain_rd_epochs=30, alpha = 5)
 
 ##################################################
 ############## Custom LR #########################
 ##################################################
-lr = 1e-5
-lr_cust = 1e-6
-plist =  []
-for name, param in list(adnw.basenetwork.named_parameters()):
-  pa = {}
-  pa["params"] = param
-  pa["lr"] = lr
-  if not ('attention' in name):
-    pa["lr"] = lr_cust
-  plist.append(pa)
+# lr = 1e-5
+# lr_cust = 1e-5
+# plist =  []
+# for name, param in list(adnw.basenetwork.named_parameters()):
+#   if param.requires_grad:
+#     pa = {}
+#     pa["params"] = param
+#     pa["lr"] = lr
+#     if not ('attention' in name):
+#       pa["lr"] = lr_cust
+#     plist.append(pa)
 
-for name, param in list(adnw.racedetector.named_parameters()):
-  pa = {}
-  pa["params"] = param
-  pa["lr"] = lr
-  plist.append(pa)
-adnw.rd_optimizer = torch.optim.Adam(plist, lr=lr)
+# for name, param in list(adnw.racedetector.named_parameters()):
+#   if param.requires_grad:
+#     pa = {}
+#     pa["params"] = param
+#     pa["lr"] = lr
+#     plist.append(pa)
+
+# adnw.rd_optimizer = torch.optim.SGD(plist, lr=lr, momentum=0.9, weight_decay=1e-4)
 ##################################################
 ##################################################
 adnw.train_network(train_loader, test_loader)
+torch.save(adnw.basenetwork, exp_folder + '_basenetwork.pt')
+torch.save(adnw.racedetector, exp_folder + '_racedetector.pt')
+torch.save(adnw.adversary, exp_folder + '_adversary.pt')
 
